@@ -36,7 +36,7 @@ def generate_parent(length):
     while len(genes) < length:
         sampleSize = min(length - len(genes), len(geneSet))
         genes.extend(random.sample(geneSet, sampleSize))
-    return ''.join(genes)
+    return np.array(genes)
 
 def get_fitness(guess):
     #edits = levenstein(target, guess)
@@ -47,22 +47,28 @@ def get_fitness(guess):
         if expected == actual:
             sim += 1
     return sim
-xxx = list(geneSet)
+
+xxx = np.array(list(geneSet))
 
 def mutate(parent):
     mutations = 1
-    locations = np.random.randint(0, len(parent), 1)
-    letters = np.random.choice(xxx, mutations)
-    alterations = np.random.choice(xxx, mutations)
+    if True:
+        locations = np.random.randint(0, len(parent), mutations)
+        #locations = [random.randrange(0, len(parent))]
+        letters = np.random.default_rng().choice(xxx, mutations*2, replace=False)
+        alterations = letters[mutations:]
+        letters = letters[:mutations]
+        child = parent.copy()
+    else:
+        locations = [random.randrange(0, len(parent))]
+        letters, alterations = random.sample(geneSet, 2)
+        child = list(parent)
 
-    child = list(parent)
-    for loc, letter, alt in zip(locations, letters, alterations):
-        if letter == child[loc]:
-            child[loc] = alt
-        else:
-            child[loc] = letter
+    child[locations[0]] = alterations[0] \
+        if letters[0] == child[locations[0]] \
+        else letters[0]
 
-    return ''.join(child)
+    return child
 
 def mutate1(parent):
     index = random.randrange(0, len(parent))
@@ -86,7 +92,8 @@ def main():
     def display(guess):
         timeDiff = datetime.datetime.now() - startTime
         fitness = get_fitness(guess)
-        print("{0}\t{1}\t{2}".format(guess, fitness, str(timeDiff)))
+        guess_str = ''.join(guess)
+        print("{0}\t{1}\t{2}".format(guess_str, fitness, str(timeDiff)))
 
     display(bestParent)
     while True:
