@@ -15,7 +15,7 @@ __handler = logging.StreamHandler()
 __handler.setFormatter(__fmt)
 logger.addHandler(__handler)
 
-default_alphabet = list(" abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789`~!@#$%^&*()_+-=[]{};'\\:\"|,./<>?")
+default_alphabet = np.array(list(" abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789`~!@#$%^&*()_+-=[]{};'\\:\"|,./<>?"))
 
 def levenstein(seq1, seq2):
     size_x = len(seq1) + 1
@@ -54,52 +54,61 @@ class GeneticAlgorithm:
 
         self.start_time = datetime.datetime.now()
 
-        self.mutation_rate = 0.01
-
-    def generate_parent(self, length):
-        return np.random.choice(self.alphabet, length, replace=True)
+    def generate_random(self, length):
+        return np.random.default_rng().choice(self.alphabet, length, replace=True)
 
     def get_fitness_levenstein(self, guess):
         edits = levenstein(self.target, guess)
         return edits / len(self.target)
 
-    def get_fitness(self, guess):
-        sim = 0
-        for expected, actual in zip(self.target, guess):
-            if expected == actual:
-                sim += 1
-        return len(self.target) - sim
+    def get_fitness(self, genes):
+        min_len = min(len(genes), len(self.target))
+        max_len = max(len(genes), len(self.target))
+        t = self.target[:min_len]
+        g = genes[:min_len]
+        equal = np.count_nonzero(t == g)
+        return equal / max_len
 
-    def display(self, guess):
-        time_diff = datetime.datetime.now() - self.start_time
-        fitness = self.get_fitness(guess)
+class Organism:
+    def __init__(self, genes, fitness, alphabet):
+        self.genes = genes
+        self.fitness = fitness
+        self.alphabet = alphabet
 
-        logger.info('{}: fitness: {:.4f}'.format(str(time_diff), fitness))
-        return fitness
+        self.mutation_rate = 0.05
 
-    def mutate1(self, parent):
+    def mate(self, other):
+        min_len = min(len(other.genes), len(self.genes))
+        o = other.genes[:min_len]
+        g = self.genes[:min_len]
+        rnd_index = np.random.rand(min_len)
+        new_genes = np.where(rnd_index < 0.5, g, o)
+
+        if len(other.genes) != len(self.genes):
+            if np.random.rand() >= 0.5:
+                if len(other.genes) > len(self.genes):
+                    new_genes = np.concatenate([new_genes, other.genes[min_len:]])
+                else:
+                    new_genes = np.concatenate([new_genes, self.genes[min_len:]])
+
+        return Organism(new_genes, 0, alphabet=self.alphabet)
+
+    def mutate1(self):
         mutations = 1
-        locations = np.random.randint(0, len(parent), 1)
-        letters = list(np.random.choice(self.alphabet, mutations))
-        alterations = list(np.random.choice(self.alphabet, mutations))
+        locations = np.random.randint(0, len(self.genes), mutations)
+        letters = np.random.default_rng().choice(self.alphabet, mutations)
 
-        child = parent.copy()
-        for loc, letter, alt in zip(locations, letters, alterations):
-            if letter == child[loc]:
-                child[loc] = alt
-            else:
-                child[loc] = letter
+        self.genes[locations] = letters
 
-        return child
-
-    def mutate(self, parent):
-        child = parent.copy()
-
+    def mutate(self):
         action_set = [ACTION_GROW, ACTION_SHRINK, ACTION_MUTATE]
         #action_set = [ACTION_MUTATE]
 
-        num_ops = math.ceil(len(child) * self.mutation_rate)
-        actions = np.random.choice(action_set, num_ops, replace=True)
+        #actions = [ACTION_MUTATE]
+        #anum = {ACTION_MUTATE: 1}
+
+        num_ops = math.ceil(len(self.genes) * self.mutation_rate)
+        actions = np.random.default_rng().choice(action_set, num_ops, replace=True)
 
         anum = defaultdict(int)
         for a in actions:
@@ -107,59 +116,108 @@ class GeneticAlgorithm:
 
         inserts = anum.get(ACTION_GROW, 0)
         if inserts > 0:
-            locations = np.random.randint(0, len(child), inserts)
+            locations = np.random.randint(0, len(self.genes), inserts)
             locations = sorted(locations)
-            letters = np.random.choice(self.alphabet, inserts)
+            letters = np.random.default_rng().choice(self.alphabet, inserts)
 
             for idx, (loc, letter) in enumerate(zip(locations, letters)):
                 loc += idx
-                c0 = child[:loc]
-                c1 = child[loc:]
+                c0 = self.genes[:loc]
+                c1 = self.genes[loc:]
                 letter = np.array([letter])
-                child = np.concatenate([c0, letter, c1], 0)
+                self.genes = np.concatenate([c0, letter, c1], 0)
 
         deletions = anum.get(ACTION_SHRINK, 0)
         if deletions > 0:
-            locations = np.random.randint(0, len(child), deletions)
+            locations = np.random.randint(0, len(self.genes), deletions)
             locations = sorted(locations)
 
             for idx, loc in enumerate(locations):
                 loc -= idx
-                c0 = child[:loc]
-                c1 = child[loc+1:]
-                child = np.concatenate([c0, c1], 0)
+                c0 = self.genes[:loc]
+                c1 = self.genes[loc+1:]
+                self.genes = np.concatenate([c0, c1], 0)
 
         mutations = anum.get(ACTION_MUTATE, 0)
         if mutations > 0:
-            locations = np.random.randint(0, len(child), mutations)
-            letters = np.random.choice(self.alphabet, mutations)
-            alterations = np.random.choice(self.alphabet, mutations)
+            loc_idx_rnd = np.random.rand(len(self.genes))
+            loc_idx = np.where(loc_idx_rnd < self.mutation_rate)
+            locations = np.arange(len(self.genes))[loc_idx]
+            letters = np.random.default_rng().choice(self.alphabet, locations.shape[0])
 
-            for loc, letter, alt in zip(locations, letters, alterations):
-                if letter == child[loc]:
-                    child[loc] = alt
-                else:
-                    child[loc] = letter
+            self.genes[locations] = letters
 
-        return child
+
+class Population:
+    def __init__(self, train, size, initial_size=10, mating_proportion=0.1):
+        self.train = train
+
+        self.population = []
+        for i in range(size):
+            p = self.train.generate_random(initial_size)
+            fit = self.train.get_fitness(p)
+
+            o = Organism(p, fit, alphabet=self.train.alphabet)
+            self.population.append(o)
+
+    def best_fitness_organism(self):
+        bfo = None
+        for o in self.population:
+            if bfo == None or o.fitness > bfo.fitness:
+                bfo = o
+
+        return bfo
+
+    def mate(self):
+        eps = 1e-6
+        fits = np.array([o.fitness + eps for o in self.population])
+        fits_sum = np.sum(fits)
+        probs = fits / fits_sum
+
+        num_pairs = len(self.population)
+        pairs = np.random.default_rng().choice(self.population, num_pairs*2, p=probs, replace=True)
+
+        new_population = []
+        for i in range(num_pairs):
+            p0 = pairs[2*i+0]
+            p1 = pairs[2*i+1]
+
+            child = p0.mate(p1)
+            child.mutate()
+
+            child.fitness = self.train.get_fitness(child.genes)
+
+            new_population.append(child)
+
+        total_population = self.population + new_population
+        sorted_population = sorted(total_population, reverse=True, key=lambda o: o.fitness)
+
+        self.population = sorted_population[:len(self.population)]
 
 def main():
     np.set_printoptions(formatter={'float': '{:0.4f}'.format, 'int': '{:4d}'.format}, linewidth=250, suppress=True, threshold=np.inf)
 
-    target = "AnhsadflkjhsOHkjdsahf437hfsdlfknsdfkljLKJDhaszdasd3872r23dGHSAdasgkdhgaisdSADG*&sdKJhdja"
+    target = np.array(list("AnhsadflkjhsOHkjdsahf437hfsdlfknsdfkljLKJDhaszdasd3872r23dGHSAdasgkdhgaisdSADG*&sdKJhdja"))
+    #target = np.array(list("dififjIOPJew89djwefe"))
     train = GeneticAlgorithm(target)
 
-    parent = train.generate_parent(len(target))
-    best_fitness = train.display(parent)
+    pop = Population(train, size=500, initial_size=len(target) * 10)
+    bfo = pop.best_fitness_organism()
+    best_fitness = bfo.fitness
 
-    while best_fitness != 0:
-        child = train.mutate(parent)
-        fitness = train.get_fitness(child)
+    gen_num = 0
+    logger.info('{}: best_fitness: {:.3f}, genes: {}/{}'.format(gen_num, bfo.fitness, len(bfo.genes), len(target)))
 
-        if fitness < best_fitness:
-            best_fitness = fitness
-            parent = child
-            fitness = train.display(child)
+    while best_fitness != 1:
+        pop.mate()
+        gen_num += 1
+        bfo = pop.best_fitness_organism()
+
+        if bfo.fitness > best_fitness:
+            best_fitness = bfo.fitness
+            logger.info('{}: best_fitness: {:.3f}, genes: {}/{}'.format(gen_num, bfo.fitness, len(bfo.genes), len(target)))
+
+        #logger.info('{}: fitness: {:.3f}, best_fitness: {:.3f}'.format(gen_num, fitness, best_fitness))
 
 if __name__ == '__main__':
     main()
